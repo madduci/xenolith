@@ -422,19 +422,22 @@ static xe_gpu_support_status xe_gpu_support(uint32_t id) {
         0x46a0, 0x46b0, 0x46a1, 0x46a3, 0x46a6, 0x46a8, 0x46aa,
         0x462a, 0x4626, 0x4628, 0x46b1, 0x46b3, 0x46c0, 0x46c1, 0x46c3,
         0xa7a0, 0xa720, 0xa7a8, 0xa7a1, 0xa721, 0xa7a9,
-        0xa7aa, 0xa7ab, 0xa7ac, 0xa7ad
+        0xa7aa, 0xa7ab, 0xa7ac, 0xa7ad,
+        0x7d40, 0x7d45, 0x7d55, 0x7dd5,
+        0x7d41, 0x7d51, 0x7d67, 0x7dd1
     };
     for (size_t i = 0; i < sizeof ids / sizeof ids[0]; i++)
         if (id == ids[i]) return XE_GPU_SUPPORTED;
     /* Experimental Meteor Lake (Xe-LPG) and Arrow Lake (Xe-LPG / Xe-LPG+).
      * IDs from intel/compute-runtime shared/source/dll/devices/devices_base.inl. */
-    switch (id) {
+    /*switch (id) {
         case 0x7d40: case 0x7d45: case 0x7d55: case 0x7dd5:
         case 0x7d41: case 0x7d51: case 0x7d67: case 0x7dd1:
             return XE_GPU_EXPERIMENTAL;
         default:
             return XE_GPU_UNSUPPORTED;
-    }
+    }*/
+   return XE_GPU_UNSUPPORTED;
 }
 
 static void xe_gpu_init(xe_engine *e) {

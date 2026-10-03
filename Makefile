@@ -1,18 +1,40 @@
+# --- optional HTTP server --------------------------------------------
+# Build with:  make WITH_HTTP=1
+# Build clean: make            (default: no HTTP server)
+WITH_HTTP ?= 0
+
 CC=gcc
 BUILD_COMMIT=$(shell git rev-parse --short=9 HEAD 2>/dev/null || printf unknown)
-BASE_CFLAGS=-O3 -march=native -std=c11 -Wall -Wextra -pthread
+BASE_CFLAGS=-O3 -march=native -std=c11 -Wall -Wextra -pthread -fsanitize=address -fno-omit-frame-pointer 
 NUMERIC_SOURCE_HASH=$(shell sha256sum xenolith.c xenolith.cl | sha256sum | cut -d' ' -f1)
 NUMERIC_CFLAGS_HASH=$(shell printf '%s' '$(BASE_CFLAGS)' | sha256sum | cut -d' ' -f1)
-CFLAGS=$(BASE_CFLAGS) -DXE_BUILD_COMMIT='"$(BUILD_COMMIT)"' \
+LDFLAGS += -fsanitize=address
+CFLAGS=$(BASE_CFLAGS) -I$(CURDIR)/http/src -DXE_BUILD_COMMIT='"$(BUILD_COMMIT)"' \
 	-DXE_NUMERIC_SOURCE_HASH='"$(NUMERIC_SOURCE_HASH)"' \
 	-DXE_NUMERIC_CFLAGS_HASH='"$(NUMERIC_CFLAGS_HASH)"'
-LDLIBS=-lm -lze_loader
+LDLIBS=-lm -lze_loader 
+
+ifeq ($(WITH_HTTP),1)
+    HTTP_SRC = http/src/xenolith_server.c \
+               http/src/openai_api.c \
+               http/src/anthropic_api.c \
+               http/src/sse_stream.c \
+               http/src/xenolith_backend.c
+    HTTP_OBJ  = $(HTTP_SRC:.c=.o)
+	CFLAGS += -DXE_WITH_HTTP=1
+    CPPFLAGS += -DXE_WITH_HTTP=1
+	CFLAGS += -I$(CURDIR) -I$(CURDIR)/http/include -I$(CURDIR)/http/src
+    CPPFLAGS += -I$(CURDIR) -I$(CURDIR)/http/include -I$(CURDIR)/http/src
+    LDLIBS   += -lmicrohttpd -ljansson -lpthread
+else
+    HTTP_OBJ  =
+endif
 
 GPU_SPV=xenolith_gpu.spv
 GPU_OBJ=xenolith_gpu_spv.o
 
-xenolith: main.o xenolith.o format.o json.o profile.o kvstore.o conversation.o wire.o serve.o $(GPU_OBJ)
-	$(CC) $(CFLAGS) -o $@ main.o xenolith.o format.o json.o profile.o kvstore.o conversation.o wire.o serve.o $(GPU_OBJ) $(LDLIBS)
+xenolith: main.o xenolith.o format.o json.o profile.o kvstore.o conversation.o wire.o serve.o $(GPU_OBJ) $(HTTP_OBJ)
+	$(CC) $(CFLAGS) -o $@ main.o xenolith.o format.o json.o profile.o kvstore.o conversation.o wire.o serve.o $(GPU_OBJ) $(HTTP_OBJ) $(LDLIBS)
 
 main.o: main.c xenolith.h profile.h serve.h conversation.h kvstore.h
 xenolith.o: xenolith.c xenolith.cl xenolith.h xenolith_internal.h format.h
@@ -23,6 +45,8 @@ kvstore.o: kvstore.c kvstore.h xenolith.h format.h
 conversation.o: conversation.c conversation.h kvstore.h xenolith.h format.h
 wire.o: wire.c wire.h xenolith.h xenolith_internal.h kvstore.h conversation.h profile.h format.h json.h
 serve.o: serve.c serve.h wire.h xenolith.h kvstore.h conversation.h profile.h json.h
+http/src/%.o: http/src/%.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
 clean:
 	rm -f *.o xenolith tests/certify tests/test_kv tests/test_decode \
@@ -40,11 +64,11 @@ clean:
 		bench/bench_guard bench/compare_pp_tg_xe bench/compare_pp_tg_tokens \
 		bench/bench_b3b.spv bench/bench_b3b_adlp.spv \
 		bench/bench_prefill_gemm bench/bench_prefill_gemm_down \
-		bench/bench_prefill_gemm.spv $(GPU_SPV) $(TEST_TOOLS)
+		bench/bench_prefill_gemm.spv $(GPU_SPV) $(TEST_TOOLS) $(HTTP_OBJ)
 
 $(GPU_SPV): xenolith.cl
 	# Xe-LP is the SPIR-V feature baseline; native code is compiled at startup.
-	ocloc compile -file $< -device xe-lp -spv_only -output xenolith_gpu \
+	ocloc compile -file $< -device xe-lp:xe-lpgplus -spv_only -output xenolith_gpu \
 		-output_no_suffix -out_dir . -options '-cl-std=CL3.0' -q
 
 $(GPU_OBJ): $(GPU_SPV)

@@ -14,6 +14,13 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include "xenolith.h"          /* for xe_engine_* */
+#ifdef XE_WITH_HTTP
+#include "xenolith_server.h"   /* for xenolith_server_* */
+int xenolith_backend_init(xenolith_backend_t *out, xe_engine *engine);
+
+static int cmd_http(const char *model, int argc, char **argv);
+#endif
 
 static void usage(void) {
     fprintf(stderr,
@@ -22,6 +29,9 @@ static void usage(void) {
 "  tokenize -p \"text\" | -f file [--pieces]\n"
 "  run      -p \"prompt\" [-n max] [--temp F] [--top-k N] [--top-p F] [--seed S]\n"
 "  chat     [-n max] [--temp F] [--top-k N] [--top-p F] [--seed S]\n"
+#ifdef XE_WITH_HTTP
+"  http     [--host <host>] [--port <port>] [--threads N]\n"  
+#endif
 "  oracle   -t \"id,id,id\" [-o logits.bin] [--layers dir] [--q8]\n"
 "  bench    [-p N] [-n N] [-d N] [-r N] [--delay S] [--no-warmup] [--progress] [-o md|jsonl]\n"
 "  wire     [--state DIR] [--cache DIR]\n"
@@ -449,6 +459,62 @@ static int cmd_chat(const char *model, int argc, char **argv) {
     cli_unlock();
     return 0;
 }
+
+#ifdef XE_WITH_HTTP
+static int cmd_http(const char *model, int argc, char **argv)
+{
+    /* argv layout: { prog, "http", model, [flags...], NULL } */
+    const char *host    = "127.0.0.1";
+    int         port    = 8080;
+    int         threads = 1;
+
+    for (int i = 3; i < argc; i++) {
+        if      (!strcmp(argv[i], "--host")    && i + 1 < argc) host    = argv[++i];
+        else if (!strcmp(argv[i], "--port")    && i + 1 < argc) port    = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--threads") && i + 1 < argc) threads = atoi(argv[++i]);
+        else { usage(); return 2; }
+    }
+
+    cli_lock(NULL);
+    xe_engine *e = xe_engine_open(model);
+    if (!e) {
+        fprintf(stderr, "xenolith: cannot open %s\n", model);
+        cli_unlock();
+        return 1;
+    }
+
+    xenolith_backend_t backend;
+    if (xenolith_backend_init(&backend, e) != 0) {
+        fprintf(stderr, "xenolith: cannot open model profile\n");
+        xe_engine_close(e);
+        cli_unlock();
+        return 1;
+    }
+
+    xenolith_server_config_t cfg = {
+        .host = host, .port = port, .threads = threads, .verbose = 1,
+    };
+    if (xenolith_server_start(&cfg, &backend) != 0) {
+        fprintf(stderr, "xenolith: cannot start HTTP server on %s:%d\n",
+                host, port);
+        xe_engine_close(e);
+        cli_unlock();
+        return 1;
+    }
+
+    fprintf(stderr, "xenolith: serving %s on http://%s:%d (Ctrl+C to stop)\n",
+            model, host, port);
+
+    /* Wait for SIGINT/SIGTERM. If Xenolith installs a handler that
+     * sets a flag, replace this with a check on that flag. */
+    for (;;) pause();
+
+    xenolith_server_stop();
+    xe_engine_close(e);
+    cli_unlock();
+    return 0;
+}
+#endif
 
 static int cmd_oracle(const char *model, int argc, char **argv) {
     const char *ids = NULL;
@@ -907,6 +973,9 @@ int main(int argc, char **argv) {
     if (!strcmp(cmd, "tokenize")) return cmd_tokenize(model, argc, argv);
     if (!strcmp(cmd, "run")) return cmd_run(model, argc, argv);
     if (!strcmp(cmd, "chat")) return cmd_chat(model, argc, argv);
+    #ifdef XE_WITH_HTTP
+    if (!strcmp(cmd, "http")) return cmd_http(model, argc, argv); 
+    #endif
     if (!strcmp(cmd, "oracle")) return cmd_oracle(model, argc, argv);
     if (!strcmp(cmd, "bench")) return cmd_bench(model, argc, argv);
     if (!strcmp(cmd, "wire")) return cmd_wire(model, argc, argv);
