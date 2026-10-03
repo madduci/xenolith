@@ -5,8 +5,20 @@
 #include <jansson.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "xenolith_server.h"
+
+/* Safe json_string for compile-time literals: avoids the compiler's
+ * inlined strlen, which can over-read short strings and trip ASan. */
+#define json_lit(s) json_stringn((s), sizeof(s) - 1)
+
+/* Jansson's json_string() collides with xenolith's own json_string()
+ * from json.c. Route through json_stringn() instead. */
+static inline json_t *json_str(const char *s)
+{
+    return json_stringn(s ? s : "", s ? strlen(s) : 0);
+}
 
 extern const xenolith_backend_t *g_backend;
 extern int                       g_verbose;

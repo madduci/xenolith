@@ -5,7 +5,7 @@ WITH_HTTP ?= 0
 
 CC=gcc
 BUILD_COMMIT=$(shell git rev-parse --short=9 HEAD 2>/dev/null || printf unknown)
-BASE_CFLAGS=-O3 -march=native -std=c11 -Wall -Wextra -pthread -fsanitize=address -fno-omit-frame-pointer 
+BASE_CFLAGS=-O1 -g -march=native -std=c11 -Wall -Wextra -pthread -fsanitize=address -fno-omit-frame-pointer -fno-builtin-strlen
 NUMERIC_SOURCE_HASH=$(shell sha256sum xenolith.c xenolith.cl | sha256sum | cut -d' ' -f1)
 NUMERIC_CFLAGS_HASH=$(shell printf '%s' '$(BASE_CFLAGS)' | sha256sum | cut -d' ' -f1)
 LDFLAGS += -fsanitize=address

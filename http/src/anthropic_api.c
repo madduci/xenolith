@@ -13,18 +13,20 @@ enum MHD_Result anthropic_messages(struct MHD_Connection *conn,
     if (!root)
         return send_json_error(conn, 400, "invalid_request_error", err.text);
 
-    /* Copy both pointers out before the tree is freed. */
-    char model_buf[256];  model_buf[0]  = 0;
-    char system_buf[4096]; system_buf[0] = 0;
+    /* --- copy every pointer we need out of the tree BEFORE decref --- */
+    char model_buf[256];   model_buf[0]   = 0;
+    char system_buf[4096]; system_buf[0]  = 0;
     {
-        const char *m_sv = json_string_value(json_object_get(root, "model"));
-        if (m_sv) {
-            strncpy(model_buf, m_sv, sizeof model_buf - 1);
+        const char *m = json_string_value(json_object_get(root, "model"));
+        if (m) {
+            strncpy(model_buf, m, sizeof model_buf - 1);
             model_buf[sizeof model_buf - 1] = 0;
         }
-        const char *s_sv = json_string_value(json_object_get(root, "system"));
-        if (s_sv) {
-            strncpy(system_buf, s_sv, sizeof system_buf - 1);
+    }
+    {
+        const char *s = json_string_value(json_object_get(root, "system"));
+        if (s) {
+            strncpy(system_buf, s, sizeof system_buf - 1);
             system_buf[sizeof system_buf - 1] = 0;
         }
     }
@@ -39,23 +41,25 @@ enum MHD_Result anthropic_messages(struct MHD_Connection *conn,
     if (!json_is_array(messages_j)) {
         json_decref(root);
         return send_json_error(conn, 400, "invalid_request_error",
-                            "messages must be an array");
+                               "messages must be an array");
     }
 
     size_t n = 0;
-    xenolith_message_t *msgs = extract_messages(messages_j,
-                                                system_buf[0] ? system_buf : NULL,
-                                                &n);
+    xenolith_message_t *msgs = extract_messages(
+        messages_j,
+        system_buf[0] ? system_buf : NULL,
+        &n);
     if (!msgs || n == 0) {
         free_messages(msgs, n);
         json_decref(root);
         return send_json_error(conn, 400, "invalid_request_error",
-                            "no usable messages");
+                               "no usable messages");
     }
     json_decref(root);
 
     const char *model = model_buf[0] ? model_buf : g_backend->default_model();
 
+    /* ---- streaming ------------------------------------------------ */
     if (stream) {
         enum MHD_Result r = run_streaming_completion(
             conn, msgs, n, max_tokens, temperature, model, 1);
@@ -63,6 +67,7 @@ enum MHD_Result anthropic_messages(struct MHD_Connection *conn,
         return r;
     }
 
+    /* ---- buffered ------------------------------------------------- */
     char *text = NULL;
     int   pt = 0, ct = 0;
     if (run_buffered_completion(msgs, n, max_tokens, temperature,
@@ -76,8 +81,8 @@ enum MHD_Result anthropic_messages(struct MHD_Connection *conn,
     make_uuid(id, sizeof id);
 
     json_t *content_item = json_object();
-    json_object_set_new(content_item, "type", json_string("text"));
-    json_object_set_new(content_item, "text", json_string(text));
+    json_object_set_new(content_item, "type", json_lit("text"));
+    json_object_set_new(content_item, "text", json_str(text));
 
     json_t *content = json_array();
     json_array_append_new(content, content_item);
@@ -87,12 +92,12 @@ enum MHD_Result anthropic_messages(struct MHD_Connection *conn,
     json_object_set_new(usage, "output_tokens", json_integer(ct));
 
     json_t *resp = json_object();
-    json_object_set_new(resp, "id",            json_string(id));
-    json_object_set_new(resp, "type",          json_string("message"));
-    json_object_set_new(resp, "role",          json_string("assistant"));
-    json_object_set_new(resp, "model",         json_string(model));
+    json_object_set_new(resp, "id",            json_str(id));
+    json_object_set_new(resp, "type",          json_lit("message"));
+    json_object_set_new(resp, "role",          json_lit("assistant"));
+    json_object_set_new(resp, "model",         json_str(model));
     json_object_set_new(resp, "content",       content);
-    json_object_set_new(resp, "stop_reason",   json_string("end_turn"));
+    json_object_set_new(resp, "stop_reason",   json_lit("end_turn"));
     json_object_set_new(resp, "stop_sequence", json_null());
     json_object_set_new(resp, "usage",         usage);
 

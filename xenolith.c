@@ -428,15 +428,6 @@ static xe_gpu_support_status xe_gpu_support(uint32_t id) {
     };
     for (size_t i = 0; i < sizeof ids / sizeof ids[0]; i++)
         if (id == ids[i]) return XE_GPU_SUPPORTED;
-    /* Experimental Meteor Lake (Xe-LPG) and Arrow Lake (Xe-LPG / Xe-LPG+).
-     * IDs from intel/compute-runtime shared/source/dll/devices/devices_base.inl. */
-    /*switch (id) {
-        case 0x7d40: case 0x7d45: case 0x7d55: case 0x7dd5:
-        case 0x7d41: case 0x7d51: case 0x7d67: case 0x7dd1:
-            return XE_GPU_EXPERIMENTAL;
-        default:
-            return XE_GPU_UNSUPPORTED;
-    }*/
    return XE_GPU_UNSUPPORTED;
 }
 

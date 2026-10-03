@@ -17,16 +17,22 @@
 static void *ping_thread(void *arg)
 {
     sse_stream_t *s = arg;
+    int ticks = 0;
+    const char *ping =
+        "event: ping\n"
+        "data: {\"type\":\"ping\"}\n\n";
+
     while (!s->aborted) {
-        struct timespec ts = { .tv_sec = 25, .tv_nsec = 0 };
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 500 * 1000 * 1000 };
         nanosleep(&ts, NULL);
         if (s->aborted) break;
-        const char *ping =
-            "event: ping\n"
-            "data: {\"type\":\"ping\"}\n\n";
-        if (sse_stream_write(s, ping, strlen(ping)) != 0) {
-            s->aborted = 1;
-            break;
+
+        if (++ticks >= 50) {          /* 50 * 500ms = 25s */
+            ticks = 0;
+            if (sse_stream_write(s, ping, strlen(ping)) != 0) {
+                s->aborted = 1;
+                break;
+            }
         }
     }
     return NULL;
@@ -378,10 +384,10 @@ static int stream_emit_openai(const char *tok, size_t len, void *ud)
     json_array_append_new(choices, choice);
 
     json_t *frame = json_object();
-    json_object_set_new(frame, "id",      json_string(st->id));
-    json_object_set_new(frame, "object",  json_string("chat.completion.chunk"));
+    json_object_set_new(frame, "id",      json_str(st->id));
+    json_object_set_new(frame, "object",  json_lit("chat.completion.chunk"));
     json_object_set_new(frame, "created", json_integer((json_int_t)time(NULL)));
-    json_object_set_new(frame, "model",   json_string(st->model));
+    json_object_set_new(frame, "model",   json_str(st->model));
     json_object_set_new(frame, "choices", choices);
 
     char *body = json_dumps(frame, JSON_COMPACT | JSON_ENSURE_ASCII);
@@ -402,7 +408,7 @@ static int stream_emit_openai(const char *tok, size_t len, void *ud)
 static void emit_openai_header(stream_state_t *st)
 {
     json_t *delta = json_object();
-    json_object_set_new(delta, "role", json_string("assistant"));
+    json_object_set_new(delta, "role", json_lit("assistant"));
 
     json_t *choice = json_object();
     json_object_set_new(choice, "index",         json_integer(0));
@@ -413,10 +419,10 @@ static void emit_openai_header(stream_state_t *st)
     json_array_append_new(choices, choice);
 
     json_t *frame = json_object();
-    json_object_set_new(frame, "id",      json_string(st->id));
-    json_object_set_new(frame, "object",  json_string("chat.completion.chunk"));
+    json_object_set_new(frame, "id",      json_str(st->id));
+    json_object_set_new(frame, "object",  json_lit("chat.completion.chunk"));
     json_object_set_new(frame, "created", json_integer((json_int_t)time(NULL)));
-    json_object_set_new(frame, "model",   json_string(st->model));
+    json_object_set_new(frame, "model",   json_str(st->model));
     json_object_set_new(frame, "choices", choices);
 
     char *body = json_dumps(frame, JSON_COMPACT | JSON_ENSURE_ASCII);
@@ -436,16 +442,16 @@ static void emit_openai_footer(stream_state_t *st, const char *reason)
     json_t *choice = json_object();
     json_object_set_new(choice, "index",         json_integer(0));
     json_object_set_new(choice, "delta",         json_object());
-    json_object_set_new(choice, "finish_reason", json_string(reason));
+    json_object_set_new(choice, "finish_reason", json_str(reason));
 
     json_t *choices = json_array();
     json_array_append_new(choices, choice);
 
     json_t *frame = json_object();
-    json_object_set_new(frame, "id",      json_string(st->id));
-    json_object_set_new(frame, "object",  json_string("chat.completion.chunk"));
+    json_object_set_new(frame, "id",      json_str(st->id));
+    json_object_set_new(frame, "object",  json_lit("chat.completion.chunk"));
     json_object_set_new(frame, "created", json_integer((json_int_t)time(NULL)));
-    json_object_set_new(frame, "model",   json_string(st->model));
+    json_object_set_new(frame, "model",   json_str(st->model));
     json_object_set_new(frame, "choices", choices);
 
     char *body = json_dumps(frame, JSON_COMPACT | JSON_ENSURE_ASCII);
@@ -468,11 +474,11 @@ static int stream_emit_anthropic(const char *tok, size_t len, void *ud)
     if (st->stream->aborted) return 1;
 
     json_t *delta = json_object();
-    json_object_set_new(delta, "type", json_string("text_delta"));
+    json_object_set_new(delta, "type", json_lit("text_delta"));
     json_object_set_new(delta, "text", json_stringn(tok, len));
 
     json_t *frame = json_object();
-    json_object_set_new(frame, "type",  json_string("content_block_delta"));
+    json_object_set_new(frame, "type",  json_lit("content_block_delta"));
     json_object_set_new(frame, "index", json_integer(0));
     json_object_set_new(frame, "delta", delta);
 
@@ -494,10 +500,10 @@ static int stream_emit_anthropic(const char *tok, size_t len, void *ud)
 static void emit_anthropic_start(stream_state_t *st, int input_tokens)
 {
     json_t *msg = json_object();
-    json_object_set_new(msg, "id",            json_string(st->id));
-    json_object_set_new(msg, "type",          json_string("message"));
-    json_object_set_new(msg, "role",          json_string("assistant"));
-    json_object_set_new(msg, "model",         json_string(st->model));
+    json_object_set_new(msg, "id",            json_str(st->id));
+    json_object_set_new(msg, "type",          json_lit("message"));
+    json_object_set_new(msg, "role",          json_lit("assistant"));
+    json_object_set_new(msg, "model",         json_str(st->model));
     json_object_set_new(msg, "content",       json_array());
     json_object_set_new(msg, "stop_reason",   json_null());
     json_object_set_new(msg, "stop_sequence", json_null());
@@ -508,7 +514,7 @@ static void emit_anthropic_start(stream_state_t *st, int input_tokens)
     json_object_set_new(msg, "usage", usage);
 
     json_t *frame = json_object();
-    json_object_set_new(frame, "type",    json_string("message_start"));
+    json_object_set_new(frame, "type",    json_lit("message_start"));
     json_object_set_new(frame, "message", msg);
 
     char *body = json_dumps(frame, JSON_COMPACT | JSON_ENSURE_ASCII);
@@ -537,14 +543,14 @@ static void emit_anthropic_end(stream_state_t *st, int out_tokens)
     write_all(st->stream, cbe, strlen(cbe));
 
     json_t *delta = json_object();
-    json_object_set_new(delta, "stop_reason",   json_string("end_turn"));
+    json_object_set_new(delta, "stop_reason",   json_lit("end_turn"));
     json_object_set_new(delta, "stop_sequence", json_null());
 
     json_t *usage = json_object();
     json_object_set_new(usage, "output_tokens", json_integer(out_tokens));
 
     json_t *frame = json_object();
-    json_object_set_new(frame, "type",  json_string("message_delta"));
+    json_object_set_new(frame, "type",  json_lit("message_delta"));
     json_object_set_new(frame, "delta", delta);
     json_object_set_new(frame, "usage", usage);
 
@@ -587,10 +593,27 @@ static void *stream_worker(void *arg)
         .token_count = 0,
     };
 
+    fprintf(stderr,
+        "[worker] fmt=%d id='%s' (len=%zu) model='%s' (len=%zu) job=%p\n",
+        job->format,
+        st.id,    strlen(st.id),
+        st.model, strlen(st.model),
+        (void *)job);
+
     if (job->format == 0) {
         emit_openai_header(&st);
     } else {
         emit_anthropic_start(&st, job->prompt_tokens);
+    }
+
+    if (job->format == 0) {
+        fprintf(stderr, "[worker] calling emit_openai_header\n");
+        emit_openai_header(&st);
+        fprintf(stderr, "[worker] returned from emit_openai_header\n");
+    } else {
+        fprintf(stderr, "[worker] calling emit_anthropic_start\n");
+        emit_anthropic_start(&st, job->prompt_tokens);
+        fprintf(stderr, "[worker] returned from emit_anthropic_start\n");
     }
 
     int (*emit)(const char *, size_t, void *) =
@@ -617,6 +640,8 @@ static void *stream_worker(void *arg)
 typedef struct {
     sse_stream_t *stream;
     pthread_t     worker;
+    pthread_t     pinger;
+    int           pinger_started;
 } mhd_stream_ctx_t;
 
 static ssize_t mhd_stream_reader(void *cls, uint64_t pos, char *buf, size_t max)
@@ -632,9 +657,11 @@ static ssize_t mhd_stream_reader(void *cls, uint64_t pos, char *buf, size_t max)
 static void mhd_stream_cleanup(void *cls)
 {
     mhd_stream_ctx_t *ctx = cls;
-    sse_stream_abort(ctx->stream);
-    pthread_join(ctx->worker, NULL);
-    sse_stream_destroy(ctx->stream);
+    sse_stream_abort(ctx->stream);            /* signals both threads   */
+    pthread_join(ctx->worker, NULL);          /* wait for generator     */
+    if (ctx->pinger_started)
+        pthread_join(ctx->pinger, NULL);      /* wait for keepalive     */
+    sse_stream_destroy(ctx->stream);          /* now safe to free       */
     free(ctx);
 }
 
@@ -663,10 +690,9 @@ enum MHD_Result run_streaming_completion(struct MHD_Connection *conn,
     job->temperature = temperature;
     job->messages    = copy_messages(messages, n_messages);
     job->n_messages  = n_messages;
-    if (model) {
-        strncpy(job->model, model, sizeof job->model - 1);
-        job->model[sizeof job->model - 1] = 0;
-    }
+    const char *src = model ? model : g_backend->default_model();
+    strncpy(job->model, src, sizeof job->model - 1);
+    job->model[sizeof job->model - 1] = 0;
     {
         char *flat = flatten_messages(messages, n_messages);
         job->prompt_tokens = estimate_tokens(flat);
@@ -689,9 +715,9 @@ enum MHD_Result run_streaming_completion(struct MHD_Connection *conn,
         sse_stream_destroy(s);
         return send_json_error(conn, 500, "internal_error", "thread");
     }
-    pthread_t pinger;
-    if (pthread_create(&pinger, NULL, ping_thread, s) == 0)
-        pthread_detach(pinger);
+    if (pthread_create(&ctx->pinger, NULL, ping_thread, s) == 0) {
+        ctx->pinger_started = 1;
+    }
 
     struct MHD_Response *resp = MHD_create_response_from_callback(
         MHD_SIZE_UNKNOWN, 4096, mhd_stream_reader, ctx, mhd_stream_cleanup);
