@@ -56,3 +56,36 @@ Get Unsloth's [Gemma 4 26B-A4B IT QAT UD-Q4_K_XL GGUF](https://huggingface.co/un
 make
 ./xenolith run /path/to/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf -p "Hello" -n 64
 ```
+
+## Optional OpenAI-like API
+
+It is possible to build also an OpenAI-like API for using xenolith with other tools, e.g. claude code.
+
+### Features
+
+- `POST /v1/chat/completions` — OpenAI Chat Completions (streaming + buffered)
+- `POST /v1/messages` — Anthropic Messages API (streaming + buffered)
+- `GET  /v1/models` — OpenAI model list
+- `GET  /health` — liveness probe
+- Full CORS support so browser clients work out of the box
+- Small footprint: libmicrohttpd + Jansson only
+
+### Build
+
+Install first microhttpd and jahsson libraries:
+
+```sh
+sudo apt install libmicrohttpd-dev libjansson-dev build-essential
+``` 
+
+then build with
+
+```sh
+make WITH_HTTP=1
+```
+
+You can run it as
+
+```sh
+./xenolith http /path/to/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf --port 8080
+```

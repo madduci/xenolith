@@ -44,7 +44,34 @@ static const char *find_system(const xenolith_message_t *msgs, size_t n)
 
 /* --- the actual generation --------------------------------------- */
 
-static int xe_generate_chat(const xenolith_message_t *messages, size_t n_messages,
+
+typedef struct {
+    const xenolith_message_t *messages;
+    size_t                    n_messages;
+    int                       max_tokens;
+    float                     temperature;
+    xenolith_token_cb         cb;
+    void                     *ud;
+
+    int                       rc;
+    int                       done;
+    pthread_mutex_t           lock;
+    pthread_cond_t            cond;
+} engine_job_t;
+
+static engine_job_t    *g_pending = NULL;
+static pthread_mutex_t  g_queue_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t   g_queue_cond = PTHREAD_COND_INITIALIZER;
+
+/* Forward declaration of the real implementation that must run on the
+ * engine-owner thread. */
+static int xe_generate_chat_impl(const xenolith_message_t *messages,
+                                 size_t n_messages,
+                                 int max_tokens, float temperature,
+                                 xenolith_token_cb cb, void *ud);
+
+
+static int xe_generate_chat_impl(const xenolith_message_t *messages, size_t n_messages,
                             int max_tokens, float temperature,
                             xenolith_token_cb cb, void *ud)
 {
@@ -135,6 +162,70 @@ fail:
     xe_tokens_free(&transcript);
     pthread_mutex_unlock(&g_lock);
     return -1;
+}
+
+/* Called by HTTP worker threads. Blocks until the owner thread has run
+ * the job. */
+static int xe_generate_chat(const xenolith_message_t *messages, size_t n,
+                            int max_tokens, float temperature,
+                            xenolith_token_cb cb, void *ud)
+{
+    engine_job_t job = {
+        .messages    = messages,
+        .n_messages  = n,
+        .max_tokens  = max_tokens,
+        .temperature = temperature,
+        .cb          = cb,
+        .ud          = ud,
+    };
+    pthread_mutex_init(&job.lock, NULL);
+    pthread_cond_init(&job.cond, NULL);
+
+    /* Hand off to the owner thread. */
+    pthread_mutex_lock(&g_queue_lock);
+    while (g_pending != NULL)
+        pthread_cond_wait(&g_queue_cond, &g_queue_lock);
+    g_pending = &job;
+    pthread_cond_broadcast(&g_queue_cond);
+    pthread_mutex_unlock(&g_queue_lock);
+
+    /* Wait for completion. */
+    pthread_mutex_lock(&job.lock);
+    while (!job.done)
+        pthread_cond_wait(&job.cond, &job.lock);
+    pthread_mutex_unlock(&job.lock);
+
+    pthread_mutex_destroy(&job.lock);
+    pthread_cond_destroy(&job.cond);
+    return job.rc;
+}
+
+/* Public entry point. The engine-owner thread calls this and does not
+ * return until the process exits. */
+int xenolith_backend_run_owner_loop(void)
+{
+    for (;;) {
+        pthread_mutex_lock(&g_queue_lock);
+        while (g_pending == NULL)
+            pthread_cond_wait(&g_queue_cond, &g_queue_lock);
+        engine_job_t *job = g_pending;
+        pthread_mutex_unlock(&g_queue_lock);
+
+        job->rc = xe_generate_chat_impl(job->messages, job->n_messages,
+                                        job->max_tokens, job->temperature,
+                                        job->cb, job->ud);
+
+        pthread_mutex_lock(&job->lock);
+        job->done = 1;
+        pthread_cond_broadcast(&job->cond);
+        pthread_mutex_unlock(&job->lock);
+
+        pthread_mutex_lock(&g_queue_lock);
+        g_pending = NULL;
+        pthread_cond_broadcast(&g_queue_cond);
+        pthread_mutex_unlock(&g_queue_lock);
+    }
+    return 0;
 }
 
 /* --- model listing ------------------------------------------------ */

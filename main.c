@@ -505,10 +505,14 @@ static int cmd_http(const char *model, int argc, char **argv)
     fprintf(stderr, "xenolith: serving %s on http://%s:%d (Ctrl+C to stop)\n",
             model, host, port);
 
-    /* Wait for SIGINT/SIGTERM. If Xenolith installs a handler that
-     * sets a flag, replace this with a check on that flag. */
-    for (;;) pause();
+    fprintf(stderr, "xenolith: serving %s on http://%s:%d (Ctrl+C to stop)\n",
+        model, host, port);
 
+    /* The current thread is the engine owner; it must stay the only
+    * thread that calls into the engine. */
+    xenolith_backend_run_owner_loop();
+
+    /* unreachable */
     xenolith_server_stop();
     xe_engine_close(e);
     cli_unlock();

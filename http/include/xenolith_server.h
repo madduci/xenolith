@@ -11,6 +11,8 @@ extern "C" {
  * Return non-zero to abort generation. */
 typedef int (*xenolith_token_cb)(const char *token, size_t len, void *userdata);
 
+int xenolith_backend_run_owner_loop(void);
+
 /* A single chat message in role/content form. */
 typedef struct {
     const char *role;     /* "system" | "user" | "assistant" | "tool" */

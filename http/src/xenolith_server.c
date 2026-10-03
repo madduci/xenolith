@@ -42,7 +42,6 @@ const xenolith_backend_t *g_backend = NULL;
 int                       g_verbose = 0;
 
 static struct MHD_Daemon *g_daemon = NULL;
-
 /* ------------------------------------------------------------------ */
 /* message extraction & lifetime                                       */
 /* ------------------------------------------------------------------ */
